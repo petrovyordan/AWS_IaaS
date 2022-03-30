@@ -1,0 +1,70 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  BaseBucket:
+    Description: Bucket used by my workflow jobs
+    Type: String
+    Default: etl-build-solution-bucket
+
+Resources:
+  MyWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      DefaultRunProperties:
+        {
+          "workflowParameter1": "csv_files",
+          "workflowParameter2": "parquet_files",
+          "workflowParameter3": "scripts",
+          "workflowParameter4": "temp-dir",
+          "bucket": { "Fn::Sub": "${BaseBucket}" }
+        }
+      Description: Workflow for orchestrating my jobs
+      Name: MyWorkflowName
+
+  WorkflowCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: MyCrawler
+      Role: MyCrawlerRole
+      Description: A crawler to run as the first step in the workflow
+      DatabaseName: MyDatabase
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${BaseBucket}/data/customers_database/customers_csv"
+
+  WorkflowJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Description: Glue job to run after the crawler
+      Name: MyWorkflowJob
+      Role: MyCrawlerRole
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${BaseBucket}/scripts"
+
+  WorkflowStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: StartTrigger
+      Type: ON_DEMAND
+      Description: Trigger for starting the workflow
+      Actions:
+        - CrawlerName: !Ref WorkflowCrawler
+      WorkflowName: !Ref MyWorkflow
+
+  WorkflowJobTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: CrawlerSuccessfulTrigger
+      Type: CONDITIONAL
+      StartOnCreation: True
+      Description: Trigger to start the glue job
+      Actions:
+        - JobName: !Ref WorkflowJob
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: !Ref WorkflowCrawler
+            CrawlState: SUCCEEDED
+      WorkflowName: !Ref MyWorkflow
