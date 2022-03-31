@@ -1,0 +1,6 @@
+Solution works as follows:
+1. Upload CodePipeline stack - code_pipeline_example.yml
+2. Go to S3 bucket and upload the .py file
+3. Upload the Glue stack - glue_stack.yml
+4. Go to ETL -> Jobs -> Run MyWorkflowJob
+5. Parquet files are located in the S3 bucket
