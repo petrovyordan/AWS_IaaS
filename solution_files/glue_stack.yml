@@ -1,0 +1,109 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:                                                                                                       
+# The name of the crawler to be created
+  CFNCrawlerName:  
+    Type: String
+    Default: csv-crawler
+  CFNDatabaseName:
+    Type: String
+    Default: csv-database
+  CFNTablePrefixName:
+    Type: String
+    Default: csv_
+  GlueRoleObject:
+    Type: String
+    Description: Use this name for the Glue Role
+    Default: GlueRoleName
+  S3BucketSource:
+    Type: String
+    Description: Source bucket to upload data as crawler's source
+    Default: yordan-solution-bucket
+
+Resources:
+#Create IAM Role assumed by the crawler. For demonstration, this role is given all permissions.
+# IAM Role & Policies
+  GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: AWS IAM role for AWS Glue resources
+      RoleName: !Ref GlueRoleObject 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: ReadAndWriteFromSpecifiedPrivateS3Bucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:List*
+                  - s3:Head*
+                  - s3:GetObject*
+                  - s3:PutObject*
+                  - s3:DeleteObject*
+                Resource: !Sub arn:aws:s3:::${S3BucketSource}/*
+
+  MyWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Description: Workflow for orchestrating my jobs
+      Name: MyWorkflowName
+
+  WorkflowCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: MyCrawler
+      Role: !Ref GlueRole
+      Description: A crawler to run as the first step in the workflow
+      DatabaseName: !Ref CFNDatabaseName
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${S3BucketSource}"
+
+  WorkflowJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Description: Glue job to run after the crawler
+      Name: MyWorkflowJob
+      Role: !Ref GlueRole
+      Command:
+        Name: pythonshell
+        ScriptLocation: !Sub "s3://${S3BucketSource}"
+
+  WorkflowStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: StartTrigger
+      Type: ON_DEMAND
+      Description: Trigger for starting the workflow
+      Actions:
+        - CrawlerName: !Ref WorkflowCrawler
+      WorkflowName: !Ref MyWorkflow
+
+  WorkflowJobTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: CrawlerSuccessfulTrigger
+      Type: CONDITIONAL
+      StartOnCreation: True
+      Description: Trigger to start the glue job
+      Actions:
+        - JobName: !Ref WorkflowJob
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: !Ref WorkflowCrawler
+            CrawlState: SUCCEEDED
+      WorkflowName: !Ref MyWorkflow
